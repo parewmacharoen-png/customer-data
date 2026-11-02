@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ข้อมูลลูกค้า</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --danger:#dc2626; --ok:#16a34a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
+  header { background:#111827; color:#fff; padding:12px 16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  nav button { background:none; border:0; color:#cbd5e1; padding:6px 10px; cursor:pointer; font-size:14px; border-radius:6px; }
+  nav button.active { background:#374151; color:#fff; }
+  main { max-width:1200px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .stat b { display:block; font-size:20px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select { padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:14px; width:100%; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .row > div { flex:1 1 160px; }
+  button.btn { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; font-size:14px; }
+  button.btn.secondary { background:#e5e7eb; color:var(--text); }
+  button.btn.danger { background:var(--danger); }
+  button.btn:disabled { opacity:.5; cursor:default; }
+  .table-wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; background:#eef2ff; color:#3730a3; }
+  .muted { color:var(--muted); }
+  .msg { margin-top:10px; font-size:13px; }
+  .hidden { display:none; }
+  .pager { display:flex; gap:8px; align-items:center; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ข้อมูลลูกค้า</h1>
+  <nav>
+    <button data-tab="status" class="active">สถานะ</button>
+    <button data-tab="customers">ลูกค้า</button>
+    <button data-tab="import">นำเข้าเบอร์</button>
+    <button data-tab="sites">ตั้งค่าเว็บ</button>
+  </nav>
+</header>
+<main>
+  <!-- สถานะ -->
+  <section id="tab-status">
+    <div class="card">
+      <h2>ภาพรวม</h2>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="card">
+      <h2>ดึงข้อมูลจาก API เว็บ</h2>
+      <p class="muted" id="cronInfo"></p>
+      <div id="runInfo" class="muted"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="btnRun">ดึงข้อมูลเลยตอนนี้</button>
+        <button class="btn danger" id="btnStop">หยุด</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ลูกค้า -->
+  <section id="tab-customers" class="hidden">
+    <div class="card">
+      <div class="row">
+        <div><label>ค้นหา (เบอร์ / ชื่อบัญชี / ผู้แนะนำ / เลขบัญชี)</label><input id="fSearch"></div>
+        <div><label>เว็บ</label><select id="fSite"><option value="">ทั้งหมด</option></select></div>
+        <div><label>ระดับ</label>
+          <select id="fRank"><option value="">ทั้งหมด</option><option>SUPER VIP</option><option>VIP2</option><option>VIP</option><option value="none">ไม่มีระดับ</option></select></div>
+        <div><label>สถานะดึงข้อมูล</label>
+          <select id="fStatus"><option value="">ทั้งหมด</option><option value="ok">สำเร็จ</option><option value="not_found">ไม่พบในเว็บ</option><option value="error">ผิดพลาด</option></select></div>
+        <div><label>เรียงตาม</label>
+          <select id="fSort"><option value="deposit">ยอดฝากมาก → น้อย</option><option value="withdraw">ยอดถอนมาก → น้อย</option><option value="synced">อัปเดตล่าสุด</option><option value="phone">เบอร์</option></select></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnFilter">ค้นหา</button>
+        <button class="btn secondary" id="btnExport">โหลดเป็น Excel (CSV)</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="muted" id="custCount"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>เว็บ</th><th>เบอร์</th><th>ชื่อบัญชี</th><th>ธนาคาร</th><th>ระดับ</th><th>ยอดฝากรวม</th><th>ครั้ง</th><th>ยอดถอนรวม</th><th>ครั้ง</th><th>ฝากล่าสุด</th><th>สมัคร</th><th>ผู้แนะนำ</th><th>อัปเดต</th></tr></thead>
+          <tbody id="custBody"></tbody>
+        </table>
+      </div>
+      <div class="pager"><button class="btn secondary" id="prev">ก่อนหน้า</button><span id="pageInfo"></span><button class="btn secondary" id="next">ถัดไป</button></div>
+    </div>
+  </section>
+
+  <!-- นำเข้า -->
+  <section id="tab-import" class="hidden">
+    <div class="card">
+      <h2>นำเข้าเบอร์ลูกค้า</h2>
+      <p class="muted">ไฟล์ .xlsx หรือ .csv ระบบจะหาคอลัมน์ที่หัวตารางมีคำว่า เบอร์ / โทร / phone / username ถ้าไม่มีหัวตารางจะใช้คอลัมน์แรก เบอร์ที่มีอยู่แล้วจะไม่ถูกเพิ่มซ้ำ</p>
+      <div class="row">
+        <div><label>เว็บ</label><select id="impSite"></select></div>
+        <div><label>ไฟล์</label><input type="file" id="impFile" accept=".xlsx,.csv,.txt"></div>
+        <div style="flex:0 0 auto"><button class="btn" id="btnImport">นำเข้า</button></div>
+      </div>
+      <div class="msg" id="impMsg"></div>
+    </div>
+  </section>
+
+  <!-- เว็บ -->
+  <section id="tab-sites" class="hidden">
+    <div class="card">
+      <h2>เว็บที่ดึงข้อมูล</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ชื่อ</th><th>API URL</th><th>Token</th><th>ลูกค้า</th><th>เปิดใช้</th><th></th></tr></thead>
+        <tbody id="sitesBody"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2 id="siteFormTitle">เพิ่มเว็บ</h2>
+      <div class="row">
+        <div><label>ชื่อ</label><input id="sName" placeholder="เช่น kingwin88"></div>
+        <div style="flex:2 1 280px"><label>API URL (user_report)</label><input id="sUrl" placeholder="https://.../api/user_report"></div>
+        <div><label>Token</label><input id="sToken" type="password" placeholder="แก้ไข: เว้นว่าง = ใช้ค่าเดิม"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnSaveSite">บันทึก</button>
+        <button class="btn secondary hidden" id="btnCancelSite">ยกเลิก</button>
+      </div>
+      <div class="msg" id="siteMsg"></div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n === null || n === undefined ? '' : Number(n).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+const fmtDate = (d) => d ? new Date(d).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+async function api(url, opts = {}) {
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || res.statusText);
+  return data;
+}
+
+// แท็บ
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
+  document.querySelectorAll('main > section').forEach((s) => s.classList.toggle('hidden', s.id !== 'tab-' + b.dataset.tab));
+  if (b.dataset.tab === 'customers') loadCustomers();
+  if (b.dataset.tab === 'sites' || b.dataset.tab === 'import') loadSites();
+});
+
+// สถานะ
+async function loadStatus() {
+  const s = await api('/api/status');
+  const r = s.lastRun;
+  $('stats').innerHTML = [
+    ['ลูกค้าทั้งหมด', s.counts.customers], ['ดึงข้อมูลแล้ว', s.counts.synced], ['VIP ขึ้นไป', s.counts.vip],
+  ].map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join('');
+  $('cronInfo').textContent = s.cron === '0 2 * * *' ? 'ดึงอัตโนมัติทุกคืน 02:00 (เวลาไทย)'
+    : s.cron ? `ดึงอัตโนมัติตามเวลา cron "${s.cron}" (เวลาไทย)` : 'ปิดการดึงอัตโนมัติอยู่';
+  if (r) {
+    const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
+    $('runInfo').innerHTML = `รอบล่าสุด (${r.trigger === 'cron' ? 'อัตโนมัติ' : 'สั่งเอง'}) เริ่ม ${fmtDate(r.started_at)}
+      ${r.finished_at ? `จบ ${fmtDate(r.finished_at)}` : `<b>กำลังรัน ${pct}%</b>`}<br>
+      ${fmt(r.done)}/${fmt(r.total)} เบอร์ · อัปเดต ${fmt(r.updated)} · ไม่พบ ${fmt(r.not_found)} · ผิดพลาด ${fmt(r.failed)}
+      ${r.skipped_sites?.length ? `<br>หยุดยิงเว็บ: ${esc(r.skipped_sites.join(', '))} (เช็ก URL/Token)` : ''}
+      ${r.stop_reason ? `<br>หยุดเพราะ: ${esc(r.stop_reason)}` : ''}
+      ${r.last_error ? `<br>error ล่าสุด: ${esc(r.last_error)}` : ''}`;
+  } else {
+    $('runInfo').textContent = 'ยังไม่เคยดึงข้อมูล';
+  }
+  $('btnRun').disabled = s.running;
+  $('btnStop').disabled = !s.running;
+}
+$('btnRun').onclick = async () => { await api('/api/sync/run', { method: 'POST' }).catch((e) => alert(e.message)); loadStatus(); };
+$('btnStop').onclick = async () => { await api('/api/sync/stop', { method: 'POST' }); loadStatus(); };
+setInterval(() => { if (!$('tab-status').classList.contains('hidden')) loadStatus().catch(() => {}); }, 5000);
+
+// เว็บ
+let sites = [];
+let editingSite = null;
+async function loadSites() {
+  sites = await api('/api/sites');
+  $('sitesBody').innerHTML = sites.map((s) => `<tr>
+    <td>${esc(s.name)}</td><td class="muted">${esc(s.api_url)}</td><td class="muted">${esc(s.api_token)}</td>
+    <td class="num">${fmt(s.customers)}</td>
+    <td><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSite(${s.id}, this.checked)" style="width:auto"></td>
+    <td><button class="btn secondary" onclick="editSite(${s.id})">แก้ไข</button>
+        <button class="btn danger" onclick="deleteSite(${s.id})">ลบ</button></td></tr>`).join('')
+    || '<tr><td colspan="6" class="muted">ยังไม่มีเว็บ เพิ่มด้านล่าง</td></tr>';
+  const opts = sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  $('impSite').innerHTML = opts;
+  const cur = $('fSite').value;
+  $('fSite').innerHTML = '<option value="">ทั้งหมด</option>' + opts;
+  $('fSite').value = cur;
+}
+window.toggleSite = (id, enabled) => api(`/api/sites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(loadSites);
+window.deleteSite = async (id) => {
+  const s = sites.find((x) => x.id === id);
+  if (!confirm(`ลบเว็บ "${s.name}" และลูกค้า ${s.customers} เบอร์ของเว็บนี้?`)) return;
+  await api(`/api/sites/${id}`, { method: 'DELETE' });
+  loadSites();
+};
+window.editSite = (id) => {
+  const s = sites.find((x) => x.id === id);
+  editingSite = id;
+  $('siteFormTitle').textContent = `แก้ไขเว็บ: ${s.name}`;
+  $('sName').value = s.name; $('sUrl').value = s.api_url; $('sToken').value = '';
+  $('btnCancelSite').classList.remove('hidden');
+};
+function resetSiteForm() {
+  editingSite = null;
+  $('siteFormTitle').textContent = 'เพิ่มเว็บ';
+  $('sName').value = $('sUrl').value = $('sToken').value = '';
+  $('btnCancelSite').classList.add('hidden');
+}
+$('btnCancelSite').onclick = resetSiteForm;
+$('btnSaveSite').onclick = async () => {
+  const body = { name: $('sName').value, api_url: $('sUrl').value, api_token: $('sToken').value };
+  try {
+    if (editingSite) await api(`/api/sites/${editingSite}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    else await api('/api/sites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    $('siteMsg').textContent = 'บันทึกแล้ว';
+    resetSiteForm();
+    loadSites();
+  } catch (e) { $('siteMsg').textContent = e.message; }
+};
+
+// นำเข้า
+$('btnImport').onclick = async () => {
+  const f = $('impFile').files[0];
+  if (!f || !$('impSite').value) { $('impMsg').textContent = 'เลือกเว็บและไฟล์ก่อน'; return; }
+  const fd = new FormData();
+  fd.append('site_id', $('impSite').value);
+  fd.append('file', f);
+  $('impMsg').textContent = 'กำลังนำเข้า...';
+  try {
+    const r = await api('/api/import', { method: 'POST', body: fd });
+    $('impMsg').textContent = `พบ ${fmt(r.found)} เบอร์ · เพิ่มใหม่ ${fmt(r.added)} · มีอยู่แล้ว ${fmt(r.alreadyExists)} · ซ้ำในไฟล์ ${fmt(r.duplicatesInFile)} · อ่านไม่ได้ ${fmt(r.invalid)}`;
+  } catch (e) { $('impMsg').textContent = e.message; }
+};
+
+// ลูกค้า
+let page = 1;
+function filterQuery() {
+  const p = new URLSearchParams();
+  [['search', 'fSearch'], ['site', 'fSite'], ['rank', 'fRank'], ['status', 'fStatus'], ['sort', 'fSort']]
+    .forEach(([k, id]) => $(id).value && p.set(k, $(id).value));
+  return p;
+}
+async function loadCustomers() {
+  if (!sites.length) await loadSites();
+  const p = filterQuery();
+  p.set('page', page);
+  const r = await api('/api/customers?' + p);
+  $('custCount').textContent = `${fmt(r.total)} รายการ`;
+  $('custBody').innerHTML = r.rows.map((c) => `<tr>
+    <td>${esc(c.site_name)}</td><td>${esc(c.phone)}</td><td>${esc(c.account_name)}</td>
+    <td>${esc(c.bank_short)} <span class="muted">${esc(c.account_number)}</span></td>
+    <td>${c.rank ? `<span class="pill">${esc(c.rank)}</span>` : ''}</td>
+    <td class="num">${fmt(c.total_deposit)}</td><td class="num">${fmt(c.count_deposit)}</td>
+    <td class="num">${fmt(c.total_withdraw)}</td><td class="num">${fmt(c.count_withdraw)}</td>
+    <td>${esc(c.last_deposit)}</td><td>${esc(c.registered_at)}</td><td>${esc(c.referrer)}</td>
+    <td class="muted">${c.last_status === 'not_found' ? 'ไม่พบในเว็บ' : c.last_status === 'error' ? 'ผิดพลาด' : fmtDate(c.synced_at)}</td></tr>`).join('')
+    || '<tr><td colspan="13" class="muted">ไม่มีข้อมูล</td></tr>';
+  const pages = Math.max(1, Math.ceil(r.total / r.limit));
+  $('pageInfo').textContent = `หน้า ${page}/${pages}`;
+  $('prev').disabled = page <= 1;
+  $('next').disabled = page >= pages;
+}
+$('btnFilter').onclick = () => { page = 1; loadCustomers(); };
+$('fSearch').onkeydown = (e) => { if (e.key === 'Enter') { page = 1; loadCustomers(); } };
+$('prev').onclick = () => { page--; loadCustomers(); };
+$('next').onclick = () => { page++; loadCustomers(); };
+$('btnExport').onclick = () => { location.href = '/api/customers/export.csv?' + filterQuery(); };
+
+loadStatus();
+</script>
+</body>
+</html>

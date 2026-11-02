@@ -1,0 +1,38 @@
+{
+  "name": "customer-data",
+  "version": "1.0.0",
+  "description": "ระบบข้อมูลลูกค้า (sync จาก API เว็บทุกคืน)",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/parewmacharoen-png/customer-data.git"
+  },
+  "bugs": {
+    "url": "https://github.com/parewmacharoen-png/customer-data/issues"
+  },
+  "homepage": "https://github.com/parewmacharoen-png/customer-data#readme",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^5.3.0",
+    "multer": "^2.5.0",
+    "node-cron": "^4.6.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "private": true
+}

@@ -54,5 +54,31 @@ export async function migrate(): Promise<void> {
       stop_reason  TEXT,
       last_error   TEXT
     );
+
+    -- รายการฝาก/ถอนจาก report-deposit / report-withdraw
+    CREATE TABLE IF NOT EXISTS transactions (
+      id             BIGSERIAL PRIMARY KEY,
+      site_id        INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      type           TEXT NOT NULL,           -- deposit | withdraw
+      ext_id         TEXT NOT NULL,           -- id ของเว็บ
+      username       TEXT,
+      datetime       TIMESTAMP,
+      amount         NUMERIC(18,2),
+      status         TEXT,
+      approved_by    TEXT,
+      admin_username TEXT,
+      info           TEXT,
+      customer_bank  JSONB,
+      bank_web       JSONB,
+      fetched_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (site_id, type, ext_id)
+    );
+    CREATE INDEX IF NOT EXISTS transactions_user_idx ON transactions (site_id, username, datetime);
+    CREATE INDEX IF NOT EXISTS transactions_dt_idx ON transactions (datetime);
+
+    -- ดึงรายการถึงวันไหนแล้ว (ต่อเว็บ)
+    ALTER TABLE sites ADD COLUMN IF NOT EXISTS tx_synced_until DATE;
+    ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS tx_fetched INT NOT NULL DEFAULT 0;
+    ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS new_customers INT NOT NULL DEFAULT 0;
   `);
 }

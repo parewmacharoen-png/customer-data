@@ -78,7 +78,8 @@ export function createApp() {
     const counts = (
       await pool.query(`SELECT count(*)::int AS customers,
           count(*) FILTER (WHERE synced_at IS NOT NULL)::int AS synced,
-          count(*) FILTER (WHERE rank IS NOT NULL)::int AS vip
+          count(*) FILTER (WHERE rank IS NOT NULL)::int AS vip,
+          (SELECT count(*)::int FROM transactions) AS transactions
         FROM customers`)
     ).rows[0];
     res.json({ running: isRunning(), lastRun: last, counts, cron: config.sync.enabled ? config.sync.cron : null });
@@ -98,7 +99,8 @@ export function createApp() {
   app.get('/api/sites', wrap(async (_req, res) => {
     const rows = (
       await pool.query(`SELECT s.id, s.name, s.api_url, s.api_token, s.enabled,
-          (SELECT count(*)::int FROM customers c WHERE c.site_id = s.id) AS customers
+          (SELECT count(*)::int FROM customers c WHERE c.site_id = s.id) AS customers,
+          to_char(s.tx_synced_until, 'YYYY-MM-DD') AS tx_synced_until
         FROM sites s ORDER BY s.id`)
     ).rows;
     res.json(rows.map((r) => ({ ...r, api_token: maskToken(r.api_token) })));

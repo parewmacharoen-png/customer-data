@@ -30,4 +30,15 @@ export const config = {
     maxMs: num('SYNC_MAX_HOURS', 5, 0.01) * 3600 * 1000,
     maxSiteErrors: num('SYNC_MAX_SITE_ERRORS', 10, 1),
   },
+  tx: {
+    // ดึงรายการฝาก/ถอน (report-deposit/withdraw) เพื่อเติมรายชื่อเบอร์อัตโนมัติ
+    enabled: process.env.TX_ENABLED !== 'false',
+    // ครั้งแรกดึงย้อนหลังกี่เดือน
+    historyMonths: num('TX_HISTORY_MONTHS', 12, 1),
+    // เว้นระหว่างแต่ละครั้ง (ลิมิตเว็บ 60 ครั้ง/นาที/IP รวม 3 เส้น) 1100ms ≈ 55 ครั้ง/นาที
+    delayMs: num('TX_DELAY_MS', 1100, 0),
+    perPage: num('TX_PER_PAGE', 500, 1),
+    // ทุกคืนดึงซ้ำย้อนหลังกี่วัน (เผื่อรายการที่สถานะเปลี่ยน)
+    overlapDays: num('TX_OVERLAP_DAYS', 3, 0),
+  },
 };

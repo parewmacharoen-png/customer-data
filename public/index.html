@@ -78,7 +78,11 @@
         <label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="mReport" checked style="width:auto"> ยอดรวม/บัญชี/ระดับ รายคน (user_report)</label>
       </div>
       <p class="muted">ไม่ใส่วันที่ = ต่อจากวันที่ดึงล่าสุด · รายการฝาก/ถอนจะเพิ่มเบอร์ใหม่เข้ารายชื่อให้เอง · ยอดรายคนจะยิงทีละเบอร์ (ช้ากว่า)</p>
-      <div class="row"><button class="btn" id="btnManual">เริ่มดึง</button></div>
+      <div class="row">
+        <button class="btn" id="btnManual">เริ่มดึง</button>
+        <button class="btn secondary" id="btnTxExport">โหลดรายการฝาก/ถอน เป็น Excel (CSV)</button>
+      </div>
+      <p class="muted">ปุ่มโหลดใช้ เว็บ/ช่วงวันที่/ติ๊กฝาก-ถอน ด้านบน จากข้อมูลที่ดึงมาแล้ว (ดึงเสร็จค่อยกดโหลด) · รายชื่อลูกค้าพร้อมยอดรวม โหลดได้ที่แท็บ "ลูกค้า"</p>
       <div class="msg" id="manualMsg"></div>
     </div>
   </section>
@@ -203,6 +207,14 @@ async function loadStatus() {
   $('btnStop').disabled = !s.running;
 }
 $('btnRun').onclick = async () => { await api('/api/sync/run', { method: 'POST' }).catch((e) => alert(e.message)); loadStatus(); };
+$('btnTxExport').onclick = () => {
+  const p = new URLSearchParams();
+  if ($('mSite').value) p.set('site', $('mSite').value);
+  if ($('mFrom').value) p.set('from', $('mFrom').value);
+  if ($('mTo').value) p.set('to', $('mTo').value);
+  if ($('mDeposit').checked !== $('mWithdraw').checked) p.set('type', $('mDeposit').checked ? 'deposit' : 'withdraw');
+  location.href = '/api/transactions/export.csv?' + p;
+};
 $('btnManual').onclick = async () => {
   const body = { site_id: $('mSite').value || undefined, from: $('mFrom').value || undefined, to: $('mTo').value || undefined,
     deposit: $('mDeposit').checked, withdraw: $('mWithdraw').checked, report: $('mReport').checked };

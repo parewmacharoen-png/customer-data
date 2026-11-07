@@ -6,6 +6,8 @@ import { pool } from './db';
 import { config } from './config';
 import { isRunning, requestStop, startSync } from './sync';
 import { parsePhoneFile } from './importer';
+import { fetchTxPage, fmt, reportUrl, TxType } from './harvest';
+import { fetchUserReport } from './webApi';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -85,8 +87,27 @@ export function createApp() {
     res.json({ running: isRunning(), lastRun: last, counts, cron: config.sync.enabled ? config.sync.cron : null });
   }));
 
-  app.post('/api/sync/run', wrap(async (_req, res) => {
-    const id = await startSync('manual');
+  // ดึงเอง: ไม่ส่ง body = ทำเหมือนรอบอัตโนมัติ
+  // body: { site_id?, from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD', deposit?: bool, withdraw?: bool, report?: bool }
+  app.post('/api/sync/run', wrap(async (req, res) => {
+    const b = req.body || {};
+    const parseDate = (v: unknown) => {
+      if (!v) return undefined;
+      const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+    };
+    const from = parseDate(b.from);
+    const to = parseDate(b.to);
+    if (from === null || to === null || (from && to && from > to)) {
+      res.status(400).json({ message: 'วันที่ไม่ถูกต้อง' });
+      return;
+    }
+    const types = (['deposit', 'withdraw'] as TxType[]).filter((t) => b[t] !== false);
+    const id = await startSync('manual', {
+      siteIds: b.site_id ? [Number(b.site_id)] : undefined,
+      harvest: types.length ? { from, to, types } : false,
+      report: b.report !== false,
+    });
     res.json(id ? { started: true, runId: id } : { started: false, message: 'มีการ sync กำลังรันอยู่' });
   }));
 
@@ -129,6 +150,35 @@ export function createApp() {
        typeof enabled === 'boolean' ? enabled : null],
     );
     res.json({ ok: true });
+  }));
+
+  // ทดสอบ API: ยิง report-deposit (7 วันล่าสุด, 3 รายการ) และ user_report (ถ้าใส่เบอร์) แล้วคืนคำตอบดิบ
+  app.post('/api/sites/:id/test', wrap(async (req, res) => {
+    const site = (await pool.query('SELECT id, name, api_url, api_token FROM sites WHERE id = $1', [Number(req.params.id)])).rows[0];
+    if (!site) {
+      res.status(404).json({ message: 'ไม่พบเว็บ' });
+      return;
+    }
+    const hide = (t: string) => (site.api_token ? t.split(site.api_token).join('***') : t);
+    const call = async (fn: () => Promise<unknown>) => {
+      try {
+        return { ok: true, body: hide(JSON.stringify(await fn(), null, 2)).slice(0, 3000) };
+      } catch (e: any) {
+        return { ok: false, body: hide(String(e?.message || e)).slice(0, 3000) };
+      }
+    };
+    const end = new Date();
+    const start = new Date(end.getTime() - 6 * 86400000);
+    const out: any = {
+      deposit: {
+        url: reportUrl(site, 'deposit'),
+        range: `${fmt(start)} .. ${fmt(end)}`,
+        ...(await call(async () => (await fetchTxPage(site, 'deposit', fmt(start), fmt(end), 1, 3, 15000)).raw)),
+      },
+    };
+    const phone = String(req.body?.phone || '').trim();
+    if (phone) out.user_report = { url: site.api_url, ...(await call(() => fetchUserReport(site, phone, 15000))) };
+    res.json(out);
   }));
 
   app.delete('/api/sites/:id', wrap(async (req, res) => {

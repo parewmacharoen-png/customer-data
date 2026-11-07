@@ -32,6 +32,8 @@ export interface SyncOptions {
   rateLimitPauseMs?: number;
   fetcher?: typeof fetchUserReport;
   harvest?: HarvestOptions | false; // false = ข้ามขั้นดึงรายการฝาก/ถอน
+  report?: boolean; // false = ข้ามขั้น user_report รายคน
+  siteIds?: number[]; // เฉพาะเว็บเหล่านี้
 }
 
 /** เริ่ม sync คืน run id หรือ null ถ้ามีรอบอื่นรันอยู่ */
@@ -88,7 +90,12 @@ async function runSync(runId: number, opts: SyncOptions): Promise<void> {
   try {
     // ขั้น 1: ดึงรายการฝาก/ถอนทั้งเว็บ → เติมเบอร์ใหม่เข้ารายชื่ออัตโนมัติ
     if (opts.harvest !== false && config.tx.enabled) {
-      const txSites = (await pool.query('SELECT id, name, api_url, api_token, tx_synced_until FROM sites WHERE enabled ORDER BY id')).rows;
+      const txSites = (
+        await pool.query(
+          'SELECT id, name, api_url, api_token, tx_synced_until FROM sites WHERE enabled AND ($1::int[] IS NULL OR id = ANY($1)) ORDER BY id',
+          [opts.siteIds ?? null],
+        )
+      ).rows;
       for (const site of txSites) {
         if (stopRequested) break;
         console.log(`[sync #${runId}] ดึงรายการฝาก/ถอน เว็บ "${site.name}" ตั้งแต่ ${site.tx_synced_until ? 'วันที่ดึงล่าสุด' : 'ย้อนหลัง'}`);
@@ -110,11 +117,17 @@ async function runSync(runId: number, opts: SyncOptions): Promise<void> {
       sites.set(row.id, row);
     }
     const jobs = (
-      await pool.query(
-        `SELECT c.id, c.site_id, c.phone FROM customers c JOIN sites s ON s.id = c.site_id
-         WHERE s.enabled ORDER BY c.synced_at ASC NULLS FIRST, c.id`,
-      )
-    ).rows as { id: number; site_id: number; phone: string }[];
+      opts.report === false
+        ? []
+        : (
+            await pool.query(
+              `SELECT c.id, c.site_id, c.phone FROM customers c JOIN sites s ON s.id = c.site_id
+               WHERE s.enabled AND ($1::int[] IS NULL OR s.id = ANY($1))
+               ORDER BY c.synced_at ASC NULLS FIRST, c.id`,
+              [opts.siteIds ?? null],
+            )
+          ).rows
+    ) as { id: number; site_id: number; phone: string }[];
     s.total = jobs.length;
     await save();
     console.log(`[sync #${runId}] เริ่ม ${jobs.length} เบอร์`);

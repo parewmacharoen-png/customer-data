@@ -88,6 +88,23 @@ describe('harvest', () => {
     expect((await site()).tx_synced_until.getDate()).toBe(31); // ถึงสิ้น ต.ค. ที่สำเร็จ
   });
 
+  it('manual range + only deposits: fetches just that, does not move the cursor', async () => {
+    await pool.query(`UPDATE sites SET tx_synced_until = '2026-11-07'`);
+    const calls: string[] = [];
+    await harvestSite(await site(), {
+      fetchPage: async (_s, type, start, end) => { calls.push(`${type} ${start} ${end}`); return { data: [], lastPage: 1 }; },
+      delayMs: 0, today, from: new Date(2026, 9, 15), to: new Date(2026, 10, 2), types: ['deposit'],
+    });
+    expect(calls).toEqual(['deposit 2026-10-15 2026-10-31', 'deposit 2026-11-01 2026-11-02']);
+    expect((await site()).tx_synced_until.getDate()).toBe(7);
+
+    // ดึงทั้งฝาก+ถอนช่วงเก่า ก็ไม่ถอยวันที่
+    await harvestSite(await site(), {
+      fetchPage: async () => ({ data: [], lastPage: 1 }), delayMs: 0, today, from: new Date(2026, 9, 1), to: new Date(2026, 9, 5),
+    });
+    expect((await site()).tx_synced_until.getDate()).toBe(7);
+  });
+
   it('nightly sync runs harvest first, then user_report for the new phones', async () => {
     const reported: string[] = [];
     await startSync('manual', {

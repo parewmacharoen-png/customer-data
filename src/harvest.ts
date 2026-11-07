@@ -12,6 +12,7 @@ export type TxType = 'deposit' | 'withdraw';
 export interface TxPage {
   data: any[];
   lastPage: number;
+  raw?: unknown; // คำตอบดิบ (ใช้กับปุ่มทดสอบ API)
 }
 
 export interface HarvestOptions {
@@ -22,6 +23,10 @@ export interface HarvestOptions {
   timeoutMs?: number;
   today?: Date;
   shouldStop?: () => boolean;
+  // เลือกเอง: ช่วงวันที่ + ประเภท (ไม่ใส่ = ต่อจากที่ดึงถึงแล้ว, ทั้งฝากและถอน)
+  from?: Date;
+  to?: Date;
+  types?: TxType[];
   fetchPage?: (site: Site, type: TxType, start: string, end: string, page: number, perPage: number, timeoutMs: number) => Promise<TxPage>;
 }
 
@@ -68,10 +73,11 @@ export async function fetchTxPage(
   return {
     data: Array.isArray(body?.data) ? body.data : [],
     lastPage: Number(body?.meta?.last_page) || 1,
+    raw: body,
   };
 }
 
-const fmt = (d: Date) =>
+export const fmt = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /** แบ่งช่วง [from, to] เป็นก้อนรายเดือนตามปฏิทิน (เว็บรับไม่เกิน 1 เดือน) */
@@ -148,8 +154,12 @@ export async function harvestSite(site: Site & { tx_synced_until?: Date | string
   const shouldStop = opts.shouldStop ?? (() => false);
   const today = opts.today ?? bangkokToday();
 
+  const types: TxType[] = opts.types && opts.types.length ? opts.types : ['deposit', 'withdraw'];
+  const to = opts.to && opts.to < today ? opts.to : today;
   let from: Date;
-  if (site.tx_synced_until) {
+  if (opts.from) {
+    from = opts.from;
+  } else if (site.tx_synced_until) {
     const d = new Date(site.tx_synced_until);
     from = new Date(d.getFullYear(), d.getMonth(), d.getDate() - overlapDays);
   } else {
@@ -159,8 +169,8 @@ export async function harvestSite(site: Site & { tx_synced_until?: Date | string
   const result: HarvestResult = { transactions: 0, newCustomers: 0, error: null };
   let first = true;
 
-  for (const [start, end] of monthWindows(from, today)) {
-    for (const type of ['deposit', 'withdraw'] as TxType[]) {
+  for (const [start, end] of monthWindows(from, to)) {
+    for (const type of types) {
       let page = 1;
       let lastPage = 1;
       let retries = 0;
@@ -189,8 +199,13 @@ export async function harvestSite(site: Site & { tx_synced_until?: Date | string
         page++;
       } while (page <= lastPage);
     }
-    // ครบทั้งฝากและถอนของเดือนนี้ → จำไว้ว่าดึงถึงวันไหนแล้ว
-    await pool.query('UPDATE sites SET tx_synced_until = $2 WHERE id = $1', [site.id, end]);
+    // ครบทั้งฝากและถอนของช่วงนี้ → จำไว้ว่าดึงถึงวันไหนแล้ว (ไม่ถอยหลัง)
+    if (types.includes('deposit') && types.includes('withdraw')) {
+      await pool.query(
+        'UPDATE sites SET tx_synced_until = GREATEST(COALESCE(tx_synced_until, $2::date), $2::date) WHERE id = $1',
+        [site.id, end],
+      );
+    }
   }
   return result;
 }

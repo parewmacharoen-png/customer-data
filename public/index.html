@@ -98,8 +98,16 @@
         <div><label>สถานะดึงข้อมูล</label>
           <select id="fStatus"><option value="">ทั้งหมด</option><option value="ok">สำเร็จ</option><option value="not_found">ไม่พบในเว็บ</option><option value="error">ผิดพลาด</option></select></div>
         <div><label>เรียงตาม</label>
-          <select id="fSort"><option value="deposit">ยอดฝากมาก → น้อย</option><option value="withdraw">ยอดถอนมาก → น้อย</option><option value="synced">อัปเดตล่าสุด</option><option value="phone">เบอร์</option></select></div>
+          <select id="fSort"><option value="deposit">ยอดฝากมาก → น้อย</option><option value="withdraw">ยอดถอนมาก → น้อย</option><option value="synced">อัปเดตล่าสุด</option><option value="phone">เบอร์</option><option value="period">ยอดฝากในช่วงที่เลือก มาก → น้อย</option><option value="gone">หายไปนานสุดก่อน</option></select></div>
       </div>
+      <div class="row" style="margin-top:10px">
+        <div><label>ยอดฝากตั้งแต่วันที่</label><input type="date" id="fFrom"></div>
+        <div><label>ถึงวันที่</label><input type="date" id="fTo"></div>
+        <div><label>ยอดฝากในช่วงนี้ ตั้งแต่ (บาท)</label><input type="number" min="0" id="fMinDep" placeholder="เช่น 10000"></div>
+        <div><label>ไม่เกิน (บาท)</label><input type="number" min="0" id="fMaxDep" placeholder="เว้นว่างได้"></div>
+        <div><label>ไม่ได้ฝากมาแล้ว อย่างน้อย (วัน)</label><input type="number" min="1" id="fInactive" placeholder="เช่น 7"></div>
+      </div>
+      <p class="muted">ตัวอย่าง: ลูกค้าฝากเกิน 10,000 ใน 1–7 พ.ย. → ใส่วันที่ + "ตั้งแต่ 10000" · ลูกค้าหายไป → ใส่ "ไม่ได้ฝากมา 7 วัน" แล้วเรียง "หายไปนานสุดก่อน" · คิดจากรายการฝากที่สำเร็จที่ดึงมาแล้ว (ถ้าไม่มีรายการฝากในระบบเลย นับว่าหายไป)</p>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="btnFilter">ค้นหา</button>
         <button class="btn secondary" id="btnExport">โหลดเป็น Excel (CSV)</button>
@@ -109,7 +117,7 @@
       <div class="muted" id="custCount"></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>เว็บ</th><th>เบอร์</th><th>ชื่อบัญชี</th><th>ธนาคาร</th><th>ระดับ</th><th>ยอดฝากรวม</th><th>ครั้ง</th><th>ยอดถอนรวม</th><th>ครั้ง</th><th>ฝากล่าสุด</th><th>สมัคร</th><th>ผู้แนะนำ</th><th>อัปเดต</th></tr></thead>
+          <thead><tr><th>เว็บ</th><th>เบอร์</th><th>ชื่อบัญชี</th><th>ธนาคาร</th><th>ระดับ</th><th>ยอดฝากรวม</th><th>ครั้ง</th><th>ยอดถอนรวม</th><th>ครั้ง</th><th>ฝากในช่วง</th><th>ครั้ง</th><th>ฝากล่าสุด</th><th>ไม่ได้ฝาก (วัน)</th><th>สมัคร</th><th>ผู้แนะนำ</th><th>อัปเดต</th></tr></thead>
           <tbody id="custBody"></tbody>
         </table>
       </div>
@@ -312,7 +320,8 @@ $('btnImport').onclick = async () => {
 let page = 1;
 function filterQuery() {
   const p = new URLSearchParams();
-  [['search', 'fSearch'], ['site', 'fSite'], ['rank', 'fRank'], ['status', 'fStatus'], ['sort', 'fSort']]
+  [['search', 'fSearch'], ['site', 'fSite'], ['rank', 'fRank'], ['status', 'fStatus'], ['sort', 'fSort'],
+   ['from', 'fFrom'], ['to', 'fTo'], ['min_dep', 'fMinDep'], ['max_dep', 'fMaxDep'], ['inactive_days', 'fInactive']]
     .forEach(([k, id]) => $(id).value && p.set(k, $(id).value));
   return p;
 }
@@ -328,9 +337,11 @@ async function loadCustomers() {
     <td>${c.rank ? `<span class="pill">${esc(c.rank)}</span>` : ''}</td>
     <td class="num">${fmt(c.total_deposit)}</td><td class="num">${fmt(c.count_deposit)}</td>
     <td class="num">${fmt(c.total_withdraw)}</td><td class="num">${fmt(c.count_withdraw)}</td>
-    <td>${esc(c.last_deposit)}</td><td>${esc(c.registered_at)}</td><td>${esc(c.referrer)}</td>
+    <td class="num">${fmt(c.p_dep)}</td><td class="num">${fmt(c.p_cnt)}</td>
+    <td>${esc(c.last_dep || c.last_deposit)}</td><td class="num">${c.gone_days ?? '<span class="muted">ไม่มีรายการ</span>'}</td>
+    <td>${esc(c.registered_at)}</td><td>${esc(c.referrer)}</td>
     <td class="muted">${c.last_status === 'not_found' ? 'ไม่พบในเว็บ' : c.last_status === 'error' ? 'ผิดพลาด' : fmtDate(c.synced_at)}</td></tr>`).join('')
-    || '<tr><td colspan="13" class="muted">ไม่มีข้อมูล</td></tr>';
+    || '<tr><td colspan="16" class="muted">ไม่มีข้อมูล</td></tr>';
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('pageInfo').textContent = `หน้า ${page}/${pages}`;
   $('prev').disabled = page <= 1;

@@ -68,6 +68,19 @@ function customerFilter(q: any) {
   return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
 }
 
+// ส่ง CSV ที่เปิดใน Excel ได้ (BOM = ภาษาไทยไม่เพี้ยน, ="0..." = 0 หน้าเบอร์ไม่หาย)
+function sendCsv(res: Response, filename: string, head: string[], rows: Record<string, unknown>[]) {
+  const esc = (v: unknown) => {
+    if (v === null || v === undefined) return '';
+    const s = v instanceof Date ? v.toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }) : String(v);
+    return /^0\d+$/.test(s) ? `="${s}"` : /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [head.join(','), ...rows.map((r) => Object.values(r).map(esc).join(','))].join('\r\n');
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send('﻿' + csv);
+}
+
 export function createApp() {
   const app = express();
   app.use(auth);
@@ -245,16 +258,45 @@ export function createApp() {
     ).rows;
     const head = ['เว็บ', 'เบอร์', 'ชื่อบัญชี', 'ธนาคาร', 'เลขบัญชี', 'ระดับ', 'ยอดฝากรวม', 'ครั้งฝาก',
       'ยอดถอนรวม', 'ครั้งถอน', 'ฝากล่าสุด', 'วันที่สมัคร', 'ผู้แนะนำ', 'อัปเดตล่าสุด', 'สถานะ'];
-    const esc = (v: unknown) => {
-      if (v === null || v === undefined) return '';
-      const s = v instanceof Date ? v.toISOString() : String(v);
-      // ="..." กัน Excel ตัด 0 หน้าเบอร์/เลขบัญชี
-      return /^0\d+$/.test(s) ? `="${s}"` : /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    sendCsv(res, `customers-${new Date().toISOString().slice(0, 10)}.csv`, head, rows);
+  }));
+
+  // รายการฝาก/ถอน: ?site=&from=YYYY-MM-DD&to=YYYY-MM-DD&type=deposit|withdraw&status=success
+  app.get('/api/transactions/export.csv', wrap(async (req, res) => {
+    const q = req.query as Record<string, string | undefined>;
+    const where: string[] = [];
+    const args: unknown[] = [];
+    const add = (cond: string, v: unknown) => {
+      args.push(v);
+      where.push(cond.replace('?', `$${args.length}`));
     };
-    const csv = [head.join(','), ...rows.map((r) => Object.values(r).map(esc).join(','))].join('\r\n');
-    res.set('Content-Type', 'text/csv; charset=utf-8');
-    res.set('Content-Disposition', `attachment; filename="customers-${new Date().toISOString().slice(0, 10)}.csv"`);
-    res.send('﻿' + csv);
+    const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (q.site) add('t.site_id = ?', Number(q.site));
+    if (q.type === 'deposit' || q.type === 'withdraw') add('t.type = ?', q.type);
+    if (q.status) add('t.status = ?', q.status);
+    if (isDate(q.from)) add('t.datetime >= ?::date', q.from);
+    if (isDate(q.to)) add("t.datetime < ?::date + interval '1 day'", q.to);
+    const rows = (
+      await pool.query(
+        `SELECT s.name AS site, CASE t.type WHEN 'deposit' THEN 'ฝาก' ELSE 'ถอน' END AS type,
+           to_char(t.datetime, 'YYYY-MM-DD HH24:MI:SS') AS datetime, t.username, t.amount, t.status,
+           t.customer_bank->>'account_name' AS cust_name, t.customer_bank->>'bank' AS cust_bank,
+           t.customer_bank->>'account_number' AS cust_no,
+           concat_ws(' ', t.bank_web->>'bank', t.bank_web->>'account_number', t.bank_web->>'account_name') AS bank_web,
+           t.approved_by, t.admin_username, t.info, t.ext_id,
+           c.rank, c.referrer
+         FROM transactions t
+         JOIN sites s ON s.id = t.site_id
+         LEFT JOIN customers c ON c.site_id = t.site_id AND c.phone = t.username
+         ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+         ORDER BY t.datetime, t.id`,
+        args,
+      )
+    ).rows;
+    const head = ['เว็บ', 'ประเภท', 'วันเวลา', 'เบอร์', 'จำนวนเงิน', 'สถานะ', 'ชื่อบัญชีลูกค้า', 'ธนาคารลูกค้า',
+      'เลขบัญชีลูกค้า', 'บัญชีเว็บ', 'อนุมัติโดย', 'แอดมิน', 'หมายเหตุ', 'รหัสรายการ', 'ระดับลูกค้า', 'ผู้แนะนำ'];
+    const name = ['transactions', q.from, q.to].filter(Boolean).join('_');
+    sendCsv(res, `${name}.csv`, head, rows);
   }));
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -18,6 +18,8 @@ function num(name: string, def: number, min: number): number {
 export const config = {
   databaseUrl: process.env.DATABASE_URL || 'postgres://localhost/customer_data',
   port: num('PORT', 3100, 1),
+  // VPS หลัง nginx = 127.0.0.1 ; Railway/Docker = 0.0.0.0
+  host: process.env.HOST || (process.env.RAILWAY_ENVIRONMENT ? '0.0.0.0' : '127.0.0.1'),
   adminUser: process.env.ADMIN_USER || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || '',
   sync: {

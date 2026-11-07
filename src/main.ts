@@ -6,8 +6,8 @@ import { startSync } from './sync';
 
 async function main() {
   await migrate();
-  createApp().listen(config.port, '127.0.0.1', () => {
-    console.log(`customer-data เปิดที่ http://127.0.0.1:${config.port}`);
+  createApp().listen(config.port, config.host, () => {
+    console.log(`customer-data เปิดที่ http://${config.host}:${config.port}`);
   });
 
   if (config.sync.enabled) {

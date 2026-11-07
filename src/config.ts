@@ -34,7 +34,7 @@ export const config = {
     // ดึงรายการฝาก/ถอน (report-deposit/withdraw) เพื่อเติมรายชื่อเบอร์อัตโนมัติ
     enabled: process.env.TX_ENABLED !== 'false',
     // ครั้งแรกดึงย้อนหลังกี่เดือน
-    historyMonths: num('TX_HISTORY_MONTHS', 12, 1),
+    historyMonths: num('TX_HISTORY_MONTHS', 1, 1),
     // เว้นระหว่างแต่ละครั้ง (ลิมิตเว็บ 60 ครั้ง/นาที/IP รวม 3 เส้น) 1100ms ≈ 55 ครั้ง/นาที
     delayMs: num('TX_DELAY_MS', 1100, 0),
     perPage: num('TX_PER_PAGE', 500, 1),

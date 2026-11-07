@@ -61,9 +61,25 @@
       <p class="muted" id="cronInfo"></p>
       <div id="runInfo" class="muted"></div>
       <div class="row" style="margin-top:12px">
-        <button class="btn" id="btnRun">ดึงข้อมูลเลยตอนนี้</button>
+        <button class="btn" id="btnRun">ดึงข้อมูลเลยตอนนี้ (เหมือนรอบอัตโนมัติ)</button>
         <button class="btn danger" id="btnStop">หยุด</button>
       </div>
+    </div>
+    <div class="card">
+      <h2>ดึงข้อมูลเอง (เลือกได้ว่าจะดึงอะไร)</h2>
+      <div class="row">
+        <div><label>เว็บ</label><select id="mSite"><option value="">ทุกเว็บ</option></select></div>
+        <div><label>รายการตั้งแต่วันที่</label><input type="date" id="mFrom"></div>
+        <div><label>ถึงวันที่</label><input type="date" id="mTo"></div>
+      </div>
+      <div class="row" style="margin-top:10px; gap:18px">
+        <label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="mDeposit" checked style="width:auto"> รายการฝาก</label>
+        <label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="mWithdraw" checked style="width:auto"> รายการถอน</label>
+        <label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="mReport" checked style="width:auto"> ยอดรวม/บัญชี/ระดับ รายคน (user_report)</label>
+      </div>
+      <p class="muted">ไม่ใส่วันที่ = ต่อจากวันที่ดึงล่าสุด · รายการฝาก/ถอนจะเพิ่มเบอร์ใหม่เข้ารายชื่อให้เอง · ยอดรายคนจะยิงทีละเบอร์ (ช้ากว่า)</p>
+      <div class="row"><button class="btn" id="btnManual">เริ่มดึง</button></div>
+      <div class="msg" id="manualMsg"></div>
     </div>
   </section>
 
@@ -120,6 +136,10 @@
         <thead><tr><th>ชื่อ</th><th>API URL</th><th>Token</th><th>ลูกค้า</th><th>รายการฝาก/ถอนถึง</th><th>เปิดใช้</th><th></th></tr></thead>
         <tbody id="sitesBody"></tbody>
       </table></div>
+    </div>
+    <div class="card hidden" id="testCard">
+      <h2>ผลทดสอบ API (Token ถูกซ่อนเป็น ***)</h2>
+      <pre id="testOut" style="white-space:pre-wrap;font-size:12px;background:#f3f4f6;padding:10px;border-radius:6px;max-height:400px;overflow:auto"></pre>
     </div>
     <div class="card">
       <h2 id="siteFormTitle">เพิ่มเว็บ</h2>
@@ -183,6 +203,16 @@ async function loadStatus() {
   $('btnStop').disabled = !s.running;
 }
 $('btnRun').onclick = async () => { await api('/api/sync/run', { method: 'POST' }).catch((e) => alert(e.message)); loadStatus(); };
+$('btnManual').onclick = async () => {
+  const body = { site_id: $('mSite').value || undefined, from: $('mFrom').value || undefined, to: $('mTo').value || undefined,
+    deposit: $('mDeposit').checked, withdraw: $('mWithdraw').checked, report: $('mReport').checked };
+  if (!body.deposit && !body.withdraw && !body.report) { $('manualMsg').textContent = 'เลือกอย่างน้อย 1 อย่าง'; return; }
+  try {
+    const r = await api('/api/sync/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    $('manualMsg').textContent = r.started ? 'เริ่มแล้ว ดูความคืบหน้าด้านบน' : r.message;
+  } catch (e) { $('manualMsg').textContent = e.message; }
+  loadStatus();
+};
 $('btnStop').onclick = async () => { await api('/api/sync/stop', { method: 'POST' }); loadStatus(); };
 setInterval(() => { if (!$('tab-status').classList.contains('hidden')) loadStatus().catch(() => {}); }, 5000);
 
@@ -197,14 +227,29 @@ async function loadSites() {
     <td class="muted">${s.tx_synced_until || 'ยังไม่เคยดึง'}</td>
     <td><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSite(${s.id}, this.checked)" style="width:auto"></td>
     <td><button class="btn secondary" onclick="editSite(${s.id})">แก้ไข</button>
+        <button class="btn secondary" onclick="testSite(${s.id})">ทดสอบ API</button>
         <button class="btn danger" onclick="deleteSite(${s.id})">ลบ</button></td></tr>`).join('')
     || '<tr><td colspan="7" class="muted">ยังไม่มีเว็บ เพิ่มด้านล่าง</td></tr>';
   const opts = sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   $('impSite').innerHTML = opts;
+  const mCur = $('mSite').value;
+  $('mSite').innerHTML = '<option value="">ทุกเว็บ</option>' + opts;
+  $('mSite').value = mCur;
   const cur = $('fSite').value;
   $('fSite').innerHTML = '<option value="">ทั้งหมด</option>' + opts;
   $('fSite').value = cur;
 }
+window.testSite = async (id) => {
+  const phone = prompt('ใส่เบอร์ลูกค้า 1 เบอร์เพื่อทดสอบ user_report ด้วย (เว้นว่างได้)') || '';
+  $('testOut').textContent = 'กำลังทดสอบ...';
+  $('testCard').classList.remove('hidden');
+  try {
+    const r = await api(`/api/sites/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) });
+    let txt = `== report-deposit (${r.deposit.range})\n${r.deposit.url}\n${r.deposit.ok ? 'สำเร็จ' : 'ผิดพลาด'}:\n${r.deposit.body}\n`;
+    if (r.user_report) txt += `\n== user_report\n${r.user_report.url}\n${r.user_report.ok ? 'สำเร็จ' : 'ผิดพลาด'}:\n${r.user_report.body}\n`;
+    $('testOut').textContent = txt;
+  } catch (e) { $('testOut').textContent = e.message; }
+};
 window.toggleSite = (id, enabled) => api(`/api/sites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(loadSites);
 window.deleteSite = async (id) => {
   const s = sites.find((x) => x.id === id);
@@ -286,6 +331,7 @@ $('next').onclick = () => { page++; loadCustomers(); };
 $('btnExport').onclick = () => { location.href = '/api/customers/export.csv?' + filterQuery(); };
 
 loadStatus();
+loadSites().catch(() => {});
 </script>
 </body>
 </html>

@@ -42,31 +42,57 @@ const SORTS: Record<string, string> = {
   withdraw: 'total_withdraw DESC NULLS LAST',
   synced: 'synced_at DESC NULLS LAST',
   phone: 'phone ASC',
+  period: 'x.p_dep DESC NULLS LAST',
+  gone: 'x.last_dep ASC NULLS FIRST',
 };
 
+const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const num = (v: unknown) => (v === undefined || v === null || v === '' || isNaN(Number(v)) ? null : Number(v));
+
+// ตัวกรองลูกค้า + สรุปยอดฝากจากตาราง transactions (เฉพาะรายการ success)
+//   from/to = ช่วงวันที่ที่ใช้คิด "ยอดฝากในช่วง", min_dep/max_dep = กรองยอดฝากในช่วง,
+//   inactive_days = ไม่ได้ฝากมาแล้วอย่างน้อยกี่วัน (รวมคนที่ไม่มีรายการฝากในระบบเลย)
 function customerFilter(q: any) {
   const where: string[] = [];
   const args: unknown[] = [];
-  if (q.site) {
-    args.push(Number(q.site));
-    where.push(`c.site_id = $${args.length}`);
-  }
+  const arg = (v: unknown) => {
+    args.push(v);
+    return `$${args.length}`;
+  };
+  const period: string[] = [];
+  if (isDate(q.from)) period.push(`t.datetime >= ${arg(q.from)}::date`);
+  if (isDate(q.to)) period.push(`t.datetime < ${arg(q.to)}::date + interval '1 day'`);
+  const inPeriod = period.length ? period.join(' AND ') : 'true';
+  const from = `customers c
+    JOIN sites s ON s.id = c.site_id
+    LEFT JOIN LATERAL (
+      SELECT coalesce(sum(t.amount) FILTER (WHERE ${inPeriod}), 0) AS p_dep,
+             count(*) FILTER (WHERE ${inPeriod})::int AS p_cnt,
+             max(t.datetime) AS last_dep
+      FROM transactions t
+      WHERE t.site_id = c.site_id AND t.username = c.phone AND t.type = 'deposit' AND t.status = 'success'
+    ) x ON true`;
+
+  if (q.site) where.push(`c.site_id = ${arg(Number(q.site))}`);
   if (q.rank === 'none') where.push('c.rank IS NULL');
-  else if (q.rank) {
-    args.push(String(q.rank));
-    where.push(`c.rank = $${args.length}`);
-  }
-  if (q.status) {
-    args.push(String(q.status));
-    where.push(`c.last_status = $${args.length}`);
-  }
+  else if (q.rank) where.push(`c.rank = ${arg(String(q.rank))}`);
+  if (q.status) where.push(`c.last_status = ${arg(String(q.status))}`);
   if (q.search) {
-    args.push(`%${String(q.search).trim()}%`);
-    const p = `$${args.length}`;
+    const p = arg(`%${String(q.search).trim()}%`);
     where.push(`(c.phone ILIKE ${p} OR c.account_name ILIKE ${p} OR c.referrer ILIKE ${p} OR c.account_number ILIKE ${p})`);
   }
-  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
+  const minDep = num(q.min_dep);
+  const maxDep = num(q.max_dep);
+  const inactive = num(q.inactive_days);
+  if (minDep !== null) where.push(`x.p_dep >= ${arg(minDep)}`);
+  if (maxDep !== null) where.push(`x.p_dep <= ${arg(maxDep)}`);
+  if (inactive !== null && inactive > 0)
+    where.push(`(x.last_dep IS NULL OR current_date - x.last_dep::date >= ${arg(Math.floor(inactive))}::int)`);
+  return { from, sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
 }
+
+const SEG_COLS = `x.p_dep, x.p_cnt, to_char(x.last_dep, 'YYYY-MM-DD HH24:MI') AS last_dep,
+  current_date - x.last_dep::date AS gone_days`;
 
 // ส่ง CSV ที่เปิดใน Excel ได้ (BOM = ภาษาไทยไม่เพี้ยน, ="0..." = 0 หน้าเบอร์ไม่หาย)
 function sendCsv(res: Response, filename: string, head: string[], rows: Record<string, unknown>[]) {
@@ -229,14 +255,14 @@ export function createApp() {
 
   // ---------- ลูกค้า ----------
   app.get('/api/customers', wrap(async (req, res) => {
-    const { sql, args } = customerFilter(req.query);
+    const { from, sql, args } = customerFilter(req.query);
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const order = SORTS[String(req.query.sort)] || SORTS.deposit;
-    const total = (await pool.query(`SELECT count(*)::int AS n FROM customers c ${sql}`, args)).rows[0].n;
+    const total = (await pool.query(`SELECT count(*)::int AS n FROM ${from} ${sql}`, args)).rows[0].n;
     const rows = (
       await pool.query(
-        `SELECT c.*, s.name AS site_name FROM customers c JOIN sites s ON s.id = c.site_id ${sql}
+        `SELECT c.*, s.name AS site_name, ${SEG_COLS} FROM ${from} ${sql}
          ORDER BY ${order}, c.id LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
         args,
       )
@@ -245,19 +271,20 @@ export function createApp() {
   }));
 
   app.get('/api/customers/export.csv', wrap(async (req, res) => {
-    const { sql, args } = customerFilter(req.query);
+    const { from, sql, args } = customerFilter(req.query);
     const order = SORTS[String(req.query.sort)] || SORTS.deposit;
     const rows = (
       await pool.query(
         `SELECT s.name AS site, c.phone, c.account_name, c.bank_short, c.account_number, c.rank,
            c.total_deposit, c.count_deposit, c.total_withdraw, c.count_withdraw, c.last_deposit,
-           c.registered_at, c.referrer, c.synced_at, c.last_status
-         FROM customers c JOIN sites s ON s.id = c.site_id ${sql} ORDER BY ${order}, c.id`,
+           c.registered_at, c.referrer, c.synced_at, c.last_status, ${SEG_COLS}
+         FROM ${from} ${sql} ORDER BY ${order}, c.id`,
         args,
       )
     ).rows;
     const head = ['เว็บ', 'เบอร์', 'ชื่อบัญชี', 'ธนาคาร', 'เลขบัญชี', 'ระดับ', 'ยอดฝากรวม', 'ครั้งฝาก',
-      'ยอดถอนรวม', 'ครั้งถอน', 'ฝากล่าสุด', 'วันที่สมัคร', 'ผู้แนะนำ', 'อัปเดตล่าสุด', 'สถานะ'];
+      'ยอดถอนรวม', 'ครั้งถอน', 'ฝากล่าสุด', 'วันที่สมัคร', 'ผู้แนะนำ', 'อัปเดตล่าสุด', 'สถานะ',
+      'ยอดฝากในช่วงที่เลือก', 'ครั้งฝากในช่วงที่เลือก', 'ฝากล่าสุด (จากรายการ)', 'ไม่ได้ฝากมา (วัน)'];
     sendCsv(res, `customers-${new Date().toISOString().slice(0, 10)}.csv`, head, rows);
   }));
 
@@ -270,7 +297,6 @@ export function createApp() {
       args.push(v);
       where.push(cond.replace('?', `$${args.length}`));
     };
-    const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
     if (q.site) add('t.site_id = ?', Number(q.site));
     if (q.type === 'deposit' || q.type === 'withdraw') add('t.type = ?', q.type);
     if (q.status) add('t.status = ?', q.status);

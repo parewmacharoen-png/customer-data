@@ -48,3 +48,35 @@ describe('transactions export', () => {
     expect(await csv('from=2026-11-04')).toHaveLength(2);
   });
 });
+
+describe('customer segments', () => {
+  async function list(q: string) {
+    const r = await fetch(base + '/api/customers?' + q, { headers: auth });
+    expect(r.status).toBe(200);
+    return (await r.json()) as { total: number; rows: any[] };
+  }
+
+  it('filters by deposit total in a date range and by days without deposit', async () => {
+    await pool.query(`INSERT INTO customers (site_id, phone) VALUES (1, '0800000003')`);
+    const big = await list('from=2026-11-01&to=2026-11-03&min_dep=300');
+    expect(big.rows.map((r) => r.phone)).toEqual(['0800000001']);
+    expect(Number(big.rows[0].p_dep)).toBe(300);
+    expect(big.rows[0].p_cnt).toBe(1);
+    expect(big.rows[0].last_dep).toBe('2026-11-01 00:00');
+    expect((await list('from=2026-11-02&to=2026-11-03&min_dep=1')).total).toBe(0);
+    expect((await list('max_dep=0')).rows.map((r) => r.phone)).toEqual(['0800000003']);
+
+    const gone = await list('inactive_days=1&sort=gone');
+    expect(gone.rows.map((r) => r.phone)).toEqual(['0800000003', '0800000001']);
+    expect(gone.rows[0].gone_days).toBeNull();
+    expect((await list('inactive_days=100000')).rows.map((r) => r.phone)).toEqual(['0800000003']);
+  });
+
+  it('exports the segment columns', async () => {
+    const r = await fetch(base + '/api/customers/export.csv?from=2026-11-01&to=2026-11-30&min_dep=1', { headers: auth });
+    const lines = (await r.text()).replace(/^﻿/, '').split('\r\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/ยอดฝากในช่วงที่เลือก,ครั้งฝากในช่วงที่เลือก,ฝากล่าสุด \(จากรายการ\),ไม่ได้ฝากมา \(วัน\)$/);
+    expect(lines[1]).toMatch(/,300\.00,1,2026-11-01 00:00,\d+$/);
+  });
+});

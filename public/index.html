@@ -101,6 +101,7 @@
   <section id="tab-import" class="hidden">
     <div class="card">
       <h2>นำเข้าเบอร์ลูกค้า</h2>
+      <p class="muted"><b>ปกติไม่ต้องอัปโหลด</b>: ทุกรอบดึงข้อมูล ระบบจะดึงรายการฝาก/ถอนของเว็บแล้วเพิ่มเบอร์ทุกคนที่มีรายการให้เอง ใช้หน้านี้เฉพาะเบอร์ที่ยังไม่เคยฝาก/ถอน</p>
       <p class="muted">ไฟล์ .xlsx หรือ .csv ระบบจะหาคอลัมน์ที่หัวตารางมีคำว่า เบอร์ / โทร / phone / username ถ้าไม่มีหัวตารางจะใช้คอลัมน์แรก เบอร์ที่มีอยู่แล้วจะไม่ถูกเพิ่มซ้ำ</p>
       <div class="row">
         <div><label>เว็บ</label><select id="impSite"></select></div>
@@ -116,7 +117,7 @@
     <div class="card">
       <h2>เว็บที่ดึงข้อมูล</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>ชื่อ</th><th>API URL</th><th>Token</th><th>ลูกค้า</th><th>เปิดใช้</th><th></th></tr></thead>
+        <thead><tr><th>ชื่อ</th><th>API URL</th><th>Token</th><th>ลูกค้า</th><th>รายการฝาก/ถอนถึง</th><th>เปิดใช้</th><th></th></tr></thead>
         <tbody id="sitesBody"></tbody>
       </table></div>
     </div>
@@ -162,6 +163,7 @@ async function loadStatus() {
   const r = s.lastRun;
   $('stats').innerHTML = [
     ['ลูกค้าทั้งหมด', s.counts.customers], ['ดึงข้อมูลแล้ว', s.counts.synced], ['VIP ขึ้นไป', s.counts.vip],
+    ['รายการฝาก/ถอน', s.counts.transactions],
   ].map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join('');
   $('cronInfo').textContent = s.cron === '0 2 * * *' ? 'ดึงอัตโนมัติทุกคืน 02:00 (เวลาไทย)'
     : s.cron ? `ดึงอัตโนมัติตามเวลา cron "${s.cron}" (เวลาไทย)` : 'ปิดการดึงอัตโนมัติอยู่';
@@ -169,6 +171,7 @@ async function loadStatus() {
     const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
     $('runInfo').innerHTML = `รอบล่าสุด (${r.trigger === 'cron' ? 'อัตโนมัติ' : 'สั่งเอง'}) เริ่ม ${fmtDate(r.started_at)}
       ${r.finished_at ? `จบ ${fmtDate(r.finished_at)}` : `<b>กำลังรัน ${pct}%</b>`}<br>
+      รายการฝาก/ถอน ${fmt(r.tx_fetched)} · ลูกค้าใหม่จากรายการ ${fmt(r.new_customers)}<br>
       ${fmt(r.done)}/${fmt(r.total)} เบอร์ · อัปเดต ${fmt(r.updated)} · ไม่พบ ${fmt(r.not_found)} · ผิดพลาด ${fmt(r.failed)}
       ${r.skipped_sites?.length ? `<br>หยุดยิงเว็บ: ${esc(r.skipped_sites.join(', '))} (เช็ก URL/Token)` : ''}
       ${r.stop_reason ? `<br>หยุดเพราะ: ${esc(r.stop_reason)}` : ''}
@@ -191,10 +194,11 @@ async function loadSites() {
   $('sitesBody').innerHTML = sites.map((s) => `<tr>
     <td>${esc(s.name)}</td><td class="muted">${esc(s.api_url)}</td><td class="muted">${esc(s.api_token)}</td>
     <td class="num">${fmt(s.customers)}</td>
+    <td class="muted">${s.tx_synced_until || 'ยังไม่เคยดึง'}</td>
     <td><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSite(${s.id}, this.checked)" style="width:auto"></td>
     <td><button class="btn secondary" onclick="editSite(${s.id})">แก้ไข</button>
         <button class="btn danger" onclick="deleteSite(${s.id})">ลบ</button></td></tr>`).join('')
-    || '<tr><td colspan="6" class="muted">ยังไม่มีเว็บ เพิ่มด้านล่าง</td></tr>';
+    || '<tr><td colspan="7" class="muted">ยังไม่มีเว็บ เพิ่มด้านล่าง</td></tr>';
   const opts = sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   $('impSite').innerHTML = opts;
   const cur = $('fSite').value;

@@ -17,7 +17,7 @@ async function reset() {
 }
 
 async function runAndWait(fetcher: any, extra = {}) {
-  const id = await startSync('manual', { delayMs: 0, maxSiteErrors: 1, fetcher, ...extra });
+  const id = await startSync('manual', { delayMs: 0, maxSiteErrors: 1, fetcher, harvest: false, ...extra });
   await (startSync as any).lastPromise;
   return id;
 }
@@ -53,7 +53,7 @@ describe('sync', () => {
   it('refuses a second concurrent run', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const first = await startSync('manual', { delayMs: 0, fetcher: async () => { await gate; return { total_deposit: '1' }; } });
+    const first = await startSync('manual', { delayMs: 0, harvest: false, fetcher: async () => { await gate; return { total_deposit: '1' }; } });
     const p = (startSync as any).lastPromise;
     expect(first).toBe(1);
     expect(await startSync('manual')).toBeNull();

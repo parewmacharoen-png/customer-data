@@ -7,6 +7,7 @@ import { PoolClient } from 'pg';
 import { pool } from './db';
 import { config } from './config';
 import { fetchUserReport, isNotFound, Site, toCustomerFields, WebApiError } from './webApi';
+import { harvestSite, HarvestOptions } from './harvest';
 
 const LOCK_ID = 7_310_001; // pg advisory lock กันรันซ้อน
 
@@ -30,6 +31,7 @@ export interface SyncOptions {
   maxSiteErrors?: number;
   rateLimitPauseMs?: number;
   fetcher?: typeof fetchUserReport;
+  harvest?: HarvestOptions | false; // false = ข้ามขั้นดึงรายการฝาก/ถอน
 }
 
 /** เริ่ม sync คืน run id หรือ null ถ้ามีรอบอื่นรันอยู่ */
@@ -71,17 +73,38 @@ async function runSync(runId: number, opts: SyncOptions): Promise<void> {
   const rateLimitPauseMs = opts.rateLimitPauseMs ?? 60000;
   const fetcher = opts.fetcher ?? fetchUserReport;
 
-  const s = { total: 0, done: 0, updated: 0, notFound: 0, failed: 0, skippedSites: [] as string[], stopReason: null as string | null, lastError: null as string | null };
+  const s = { txFetched: 0, newCustomers: 0, total: 0, done: 0, updated: 0, notFound: 0, failed: 0, skippedSites: [] as string[], stopReason: null as string | null, lastError: null as string | null };
   const save = (finished = false) =>
     pool.query(
       `UPDATE sync_runs SET total=$2, done=$3, updated=$4, not_found=$5, failed=$6, skipped_sites=$7,
-         stop_reason=$8, last_error=$9, finished_at = CASE WHEN $10 THEN now() ELSE finished_at END
+         stop_reason=$8, last_error=$9, finished_at = CASE WHEN $10 THEN now() ELSE finished_at END,
+         tx_fetched=$11, new_customers=$12
        WHERE id=$1`,
-      [runId, s.total, s.done, s.updated, s.notFound, s.failed, s.skippedSites, s.stopReason, s.lastError, finished],
+      [runId, s.total, s.done, s.updated, s.notFound, s.failed, s.skippedSites, s.stopReason, s.lastError, finished,
+       s.txFetched, s.newCustomers],
     );
 
   const t0 = Date.now();
   try {
+    // ขั้น 1: ดึงรายการฝาก/ถอนทั้งเว็บ → เติมเบอร์ใหม่เข้ารายชื่ออัตโนมัติ
+    if (opts.harvest !== false && config.tx.enabled) {
+      const txSites = (await pool.query('SELECT id, name, api_url, api_token, tx_synced_until FROM sites WHERE enabled ORDER BY id')).rows;
+      for (const site of txSites) {
+        if (stopRequested) break;
+        console.log(`[sync #${runId}] ดึงรายการฝาก/ถอน เว็บ "${site.name}" ตั้งแต่ ${site.tx_synced_until ? 'วันที่ดึงล่าสุด' : 'ย้อนหลัง'}`);
+        const r = await harvestSite(site, { shouldStop: () => stopRequested, ...(opts.harvest || {}) });
+        s.txFetched += r.transactions;
+        s.newCustomers += r.newCustomers;
+        if (r.error) {
+          s.lastError = r.error;
+          console.warn(`[sync #${runId}] ดึงรายการไม่ครบ: ${r.error}`);
+        }
+        console.log(`[sync #${runId}] เว็บ "${site.name}": ${r.transactions} รายการ, ลูกค้าใหม่ ${r.newCustomers}`);
+        await save();
+      }
+    }
+
+    // ขั้น 2: ยิง user_report ทีละเบอร์ (ยอดรวม/บัญชี/ผู้แนะนำ/ระดับ)
     const sites = new Map<number, Site>();
     for (const row of (await pool.query('SELECT id, name, api_url, api_token FROM sites WHERE enabled')).rows) {
       sites.set(row.id, row);
